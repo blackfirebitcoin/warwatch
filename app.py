@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -938,6 +939,7 @@ class WarWatchApp(App):
     def on_mount(self) -> None:
         models.init_db()
         self._prune_old_events()
+        self._run_data_hygiene()
         self._load_filter_state()
         self.refresh_header()
         self.refresh_feed()
@@ -999,6 +1001,10 @@ class WarWatchApp(App):
 
         if self.filter_search:
             q = self.filter_search.lower()
+            # Python substring still applied here so this composes with
+            # confidence/etype filters that operate on the row list. The
+            # FTS5-backed pre-filter happens upstream in refresh_feed
+            # when no other row-level filters are active.
             out = [r for r in out if q in (r["summary"] or "").lower()
                    or q in (r["location"] or "").lower()]
         return out
@@ -1065,7 +1071,20 @@ class WarWatchApp(App):
         # consistent with the feed. Theater filter doesn't apply here —
         # each row already is one theater.
         filters_active = bool(self.filter_confidence or self.filter_etype or self.filter_search)
+        # Fast path: no filters → one GROUP BY query covers all 6 theaters
+        # instead of 6 round-trips (each fetching full _FEED_COLS rows
+        # only to count + status-classify them).
+        bulk_counts = None
+        if not filters_active:
+            bulk_counts = models.theater_counts_since(conn, hours=6)
         for theater in ["LEBANON", "IRAN", "GAZA", "SYRIA", "YEMEN", "ENERGY"]:
+            if bulk_counts is not None:
+                # We still need the row list for status/badge classification,
+                # but we can short-circuit zero-count theaters.
+                if not bulk_counts.get(theater):
+                    badge = sitrep_mod.theater_badge("QUIET")
+                    lines.append(f"{theater:<8} {badge} QUIET  [dim](0 last 6h)[/dim]")
+                    continue
             evs = list(models.events_since(conn, hours=6, theater=theater))
             if filters_active:
                 evs = self._apply_filters(evs)
@@ -1125,6 +1144,62 @@ class WarWatchApp(App):
             conn.close()
         if n:
             self.status_msg = f"[dim]pruned {n} event{'s' if n != 1 else ''} older than {retention}d[/dim]"
+
+    def _run_data_hygiene(self) -> None:
+        """Per-startup data hygiene: prune log tables, backfill legacy
+        columns, ensure FTS index is in sync, optionally VACUUM/ANALYZE.
+
+        All steps are bounded and idempotent — safe to run on every
+        launch even when nothing needs cleaning. Failures are swallowed
+        with a status-bar dim line; we never want a hygiene hiccup to
+        block the main feed."""
+        try:
+            conn = models.get_conn()
+            try:
+                pruned_log = models.prune_scrape_log(
+                    conn, int(CONFIG.get("scrape_log_retention_days", 0) or 0)
+                )
+                pruned_alerts = models.prune_alerts_fired(
+                    conn, int(CONFIG.get("alerts_log_retention_days", 0) or 0)
+                )
+                backfilled = models.backfill_first_seen_at(conn)
+                # Rebuild FTS once if it's stale (legacy DB upgraded to
+                # the FTS5 schema mid-life). Cheap when up to date.
+                try:
+                    fts_count = conn.execute(
+                        "SELECT COUNT(*) FROM events_fts"
+                    ).fetchone()[0]
+                    ev_count = conn.execute(
+                        "SELECT COUNT(*) FROM events"
+                    ).fetchone()[0]
+                    if fts_count < ev_count:
+                        models.rebuild_fts(conn)
+                except sqlite3.OperationalError:
+                    # FTS5 unavailable on this SQLite build — search_events
+                    # already has a LIKE fallback.
+                    pass
+                if CONFIG.get("vacuum_on_startup"):
+                    models.vacuum_analyze(conn)
+                audit = models.data_audit(conn)
+            finally:
+                conn.close()
+        except Exception as exc:
+            self.status_msg = f"[red dim]hygiene: {exc}[/red dim]"
+            return
+        bits = []
+        if pruned_log:
+            bits.append(f"-{pruned_log} log")
+        if pruned_alerts:
+            bits.append(f"-{pruned_alerts} alerts")
+        if backfilled:
+            bits.append(f"backfilled {backfilled}")
+        if audit.get("unconfirmed_with_2plus_sources"):
+            # Surface a quiet warning — not a crash, but worth knowing.
+            bits.append(
+                f"[yellow]⚠ {audit['unconfirmed_with_2plus_sources']} multi-source unconfirmed[/yellow]"
+            )
+        if bits:
+            self.status_msg = "[dim]hygiene: " + ", ".join(bits) + "[/dim]"
 
     def _load_filter_state(self) -> None:
         """Restore filter pills saved by the previous run. Missing or
