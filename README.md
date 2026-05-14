@@ -15,7 +15,7 @@
 <p align="center">
   <img alt="Python 3.10+"      src="https://img.shields.io/badge/python-3.10+-blue">
   <img alt="License: MIT"      src="https://img.shields.io/badge/license-MIT-green">
-  <img alt="Tests: 62 passing" src="https://img.shields.io/badge/tests-62%20passing-brightgreen">
+  <img alt="Tests: 62 passing" src="https://img.shields.io/badge/tests-76%20passing-brightgreen">
   <img alt="Status: prototype" src="https://img.shields.io/badge/status-prototype-orange">
 </p>
 
@@ -27,8 +27,13 @@
   events, ~25% reduction)
 - Classifies events into **6 theaters** (Lebanon, Iran, Gaza, Syria, Yemen,
   Energy) and **11 event types**
-- Stores in WAL-mode SQLite with compound indexes and full multi-source
-  confirmation tracking
+- Stores in WAL-mode SQLite with compound indexes, FTS5 full-text
+  search (prefix support: `hez*`), and full multi-source confirmation
+  tracking
+- Self-maintaining: per-startup data hygiene prunes stale scrape logs
+  + alert dedup marks, backfills legacy columns, runs `VACUUM`/`ANALYZE`,
+  and surfaces a one-line audit (events total, missing fields,
+  multi-source unconfirmed)
 - Generates **SITREP-style briefings** on demand using an LLM synthesis layer
   over the live event database
 - Optional Android push alerts via `termux-notification` for high-severity
@@ -111,8 +116,9 @@ reproducible.
 pytest
 ```
 
-62 tests cover classifier behavior, three-pass deduplication, filter
-composition, and brief threading.
+76 tests cover classifier behavior, three-pass deduplication, filter
+composition, brief threading, FTS5 search, retention, audit, and
+data-backfill correctness.
 
 ## Benchmarking ingest
 
@@ -143,6 +149,12 @@ Reference numbers (M3 MacBook Pro, after the recent perf pass):
 | `retention_days`          | 30      | Prune events older than N days from the DB   |
 | `request_timeout`         | 20      | HTTP read timeout per source (seconds)       |
 | `alerts.enabled`          | true    | Fire push notifications for matching events  |
+| `scrape_log_retention_days` | 14    | Drop scrape_log rows older than N days       |
+| `alerts_log_retention_days` | 60    | Drop alerts_fired rows older than N days     |
+| `vacuum_on_startup`       | true    | Run VACUUM + ANALYZE once per launch         |
+| `dedup.tight_window_min`  | 15      | Pass 1 dedup time window (minutes)           |
+| `dedup.wide_window_min`   | 240     | Pass 2 dedup time window (minutes)           |
+| `dedup.cluster_window_min`| 720     | Pass 3 dedup time window (minutes)           |
 
 Per-source overrides (e.g. `max_age_days`, `relevance_gate`,
 `theater_hint`) live alongside each entry under `sources` in
