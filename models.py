@@ -11,6 +11,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+# Lazy-load config so models.py stays importable even when config.json
+# is missing (e.g. test fixtures, fresh install bench). Memoized: disk
+# I/O on every find_dup call costs ~150ms per ingest cycle. Process-life
+# cache is fine because dedup windows are not edited at runtime — the
+# user restarts WarWatch to pick up a new config anyway.
+@lru_cache(maxsize=1)
+def _dedup_cfg() -> dict:
+    try:
+        import json as _json
+        cfg_path = Path(__file__).resolve().parent / "config.json"
+        return (_json.loads(cfg_path.read_text()) or {}).get("dedup") or {}
+    except Exception:
+        return {}
+
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "db" / "warwatch.db"
 
@@ -93,6 +107,37 @@ CREATE TABLE IF NOT EXISTS context_snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_context_kind_ts ON context_snapshots(kind, fetched_at);
+
+-- ---------- FTS5 search ----------
+-- External-content table mirrors events.summary + events.location for
+-- the substring search box. content='events' + content_rowid='rowid'
+-- means rows are not duplicated; the FTS index just points back to
+-- the events row. Triggers below keep them in sync on insert/update/
+-- delete so we never have to manually rebuild.
+--
+-- Old code path: Python list-comp scanning every visible row's lower()
+-- summary on every keystroke. New path: events_fts MATCH ? joined back
+-- to events. Same behavior, but O(log n) instead of O(n) and we get
+-- prefix matching ("hez*") for free.
+CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+    summary, location, content='events', content_rowid='rowid',
+    tokenize='unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS events_fts_ai AFTER INSERT ON events BEGIN
+  INSERT INTO events_fts(rowid, summary, location)
+    VALUES (new.rowid, new.summary, new.location);
+END;
+CREATE TRIGGER IF NOT EXISTS events_fts_ad AFTER DELETE ON events BEGIN
+  INSERT INTO events_fts(events_fts, rowid, summary, location)
+    VALUES ('delete', old.rowid, old.summary, old.location);
+END;
+CREATE TRIGGER IF NOT EXISTS events_fts_au AFTER UPDATE ON events BEGIN
+  INSERT INTO events_fts(events_fts, rowid, summary, location)
+    VALUES ('delete', old.rowid, old.summary, old.location);
+  INSERT INTO events_fts(rowid, summary, location)
+    VALUES (new.rowid, new.summary, new.location);
+END;
 """
 
 
@@ -338,9 +383,9 @@ def reconcile_type(existing: str, incoming: str) -> str:
 def find_dup(
     conn: sqlite3.Connection,
     ev: Event,
-    tight_window_min: int = 15,
-    wide_window_min: int = 240,
-    cluster_window_min: int = 720,
+    tight_window_min: Optional[int] = None,
+    wide_window_min: Optional[int] = None,
+    cluster_window_min: Optional[int] = None,
 ) -> Optional[sqlite3.Row]:
     """Find an existing event that matches within a fuzzy window.
 
@@ -362,6 +407,18 @@ def find_dup(
     same-or-cluster type match, and a tighter similarity bar (0.60) than
     Pass 2's locationless threshold.
     """
+    # Window defaults: caller arg → config.json `dedup` block → hardcoded.
+    # The hardcoded values match the original behavior and the test suite,
+    # so a missing config.json never changes dedup outcomes.
+    if tight_window_min is None or wide_window_min is None or cluster_window_min is None:
+        cfg = _dedup_cfg()
+        if tight_window_min is None:
+            tight_window_min = int(cfg.get("tight_window_min", 15))
+        if wide_window_min is None:
+            wide_window_min = int(cfg.get("wide_window_min", 240))
+        if cluster_window_min is None:
+            cluster_window_min = int(cfg.get("cluster_window_min", 720))
+
     ev_dt = _parse_ts(ev.timestamp)
     if ev_dt is None:
         return conn.execute(f"SELECT {_DUP_COLS} FROM events WHERE id=?", (ev.id,)).fetchone()
@@ -936,6 +993,215 @@ def mark_alerted(
         (event_id, datetime.now(timezone.utc).isoformat(), event_type, confidence),
     )
     conn.commit()
+
+
+def prune_scrape_log(conn: sqlite3.Connection, retention_days: int) -> int:
+    """Delete scrape_log rows older than `retention_days` days.
+
+    scrape_log grows by 15 rows per scrape cycle (one per source). At
+    the default 5-min interval that is ~4,300 rows/day. Without retention
+    a year-old install carries ~1.6M scrape_log rows that no UI surface
+    ever reads beyond the 7-day source-health window.
+    """
+    if retention_days is None or retention_days <= 0:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=int(retention_days))).isoformat()
+    cur = conn.execute("DELETE FROM scrape_log WHERE timestamp < ?", (cutoff,))
+    conn.commit()
+    return cur.rowcount or 0
+
+
+def prune_alerts_fired(conn: sqlite3.Connection, retention_days: int) -> int:
+    """Delete alerts_fired rows older than `retention_days` days.
+
+    alerts_fired is a per-event dedup mark. Once the underlying event
+    has aged out of the events table (retention_days, default 30) the
+    matching alerts_fired row can never fire again and just consumes
+    space. Default 60d gives a generous safety margin past event
+    retention so a clock-skewed alerts row never re-fires."""
+    if retention_days is None or retention_days <= 0:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=int(retention_days))).isoformat()
+    cur = conn.execute("DELETE FROM alerts_fired WHERE fired_at < ?", (cutoff,))
+    conn.commit()
+    return cur.rowcount or 0
+
+
+def vacuum_analyze(conn: sqlite3.Connection) -> None:
+    """Reclaim freelist pages and refresh ANALYZE stats.
+
+    Called once per startup. After a prune cycle the DB file holds N
+    pages of freelist that VACUUM can return to the OS; ANALYZE refreshes
+    the planner's row-count estimates so the new compound index gets
+    picked. Both are no-ops on a brand-new DB.
+
+    NOTE: VACUUM cannot run inside a transaction. We commit anything
+    pending first, then call it on the bare connection."""
+    conn.commit()
+    conn.execute("VACUUM;")
+    conn.execute("ANALYZE;")
+    conn.commit()
+
+
+def backfill_first_seen_at(conn: sqlite3.Connection) -> int:
+    """Populate first_seen_at on legacy rows that predate the column.
+
+    The column was added in a defensive migration that copies it from
+    events_old; rows inserted before that migration may still have NULL.
+    Falls back to created_at, then to timestamp, so feed ordering never
+    sees a NULL first_seen_at after this runs.
+    """
+    cur = conn.execute(
+        """UPDATE events
+              SET first_seen_at = COALESCE(first_seen_at, created_at, timestamp)
+            WHERE first_seen_at IS NULL"""
+    )
+    conn.commit()
+    return cur.rowcount or 0
+
+
+def rebuild_fts(conn: sqlite3.Connection) -> None:
+    """Force-rebuild the events_fts index from events.
+
+    Run this once on the upgrade path so every existing event becomes
+    searchable; subsequent inserts/updates/deletes keep it fresh via
+    triggers. The 'rebuild' command is idempotent and cheap on small
+    DBs (<10k rows = <100ms)."""
+    conn.execute("INSERT INTO events_fts(events_fts) VALUES('rebuild');")
+    conn.commit()
+
+
+def data_audit(conn: sqlite3.Connection) -> dict:
+    """One-shot sanity report on the events table.
+
+    Returns counts of:
+      - events_total
+      - missing_first_seen
+      - other_theater (theater='OTHER' should be 0; ingest filters them)
+      - empty_summary
+      - duplicate_id (PK constraint should make this 0; ANY non-zero is
+        a corruption signal)
+      - unconfirmed_with_2plus_sources (should be 0 — these are merge
+        bugs where confidence didn't ratchet up)
+
+    Cheap enough to run on every startup; logs an inline warning if any
+    bucket is non-trivial.
+    """
+    out = {}
+    out["events_total"] = conn.execute(
+        "SELECT COUNT(*) FROM events"
+    ).fetchone()[0]
+    out["missing_first_seen"] = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE first_seen_at IS NULL"
+    ).fetchone()[0]
+    out["other_theater"] = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE theater='OTHER'"
+    ).fetchone()[0]
+    out["empty_summary"] = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE summary IS NULL OR summary=''"
+    ).fetchone()[0]
+    out["unconfirmed_with_2plus_sources"] = conn.execute(
+        """SELECT COUNT(*) FROM events
+            WHERE confidence != 'CONFIRMED'
+              AND json_array_length(COALESCE(sources, '[]')) >= 2"""
+    ).fetchone()[0]
+    return out
+
+
+def search_events(
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int = 200,
+    theater: Optional[str] = None,
+):
+    """FTS5-backed substring search over summary + location.
+
+    Falls back to LIKE if FTS5 isn't available (e.g. SQLite built without
+    the extension — rare on macOS/Linux but possible on stripped builds).
+    Theater filter, when present, is applied as a normal WHERE — the
+    planner is happy to combine FTS5 MATCH with another column predicate.
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+    # FTS5 wants quoted phrases for multi-token literals. Strip control
+    # chars and double-quote each whitespace-split token so an MCP-style
+    # query like  hezbollah "south litani"  doesn't blow up the parser.
+    safe_tokens = []
+    for tok in q.split():
+        prefix = tok.endswith("*")
+        cleaned = tok.rstrip("*").replace('"', '').replace("'", "")
+        if not cleaned:
+            continue
+        # FTS5: "phrase"* is a prefix match; "phrase" is an exact match.
+        # We always quote the token to defend against operator chars in
+        # user input (NEAR, AND, OR, parens) being interpreted as syntax.
+        safe_tokens.append(f'"{cleaned}"*' if prefix else f'"{cleaned}"')
+    if not safe_tokens:
+        return []
+    match_expr = " ".join(safe_tokens)
+
+    # events_fts mirrors `summary` and `location`, so a bare SELECT
+    # that names those columns is ambiguous. Prefix with the alias.
+    feed_cols_qualified = ", ".join(f"e.{c.strip()}" for c in _FEED_COLS.split(","))
+    if theater and theater != "ALL":
+        sql = (
+            f"SELECT {feed_cols_qualified} FROM events e "
+            "JOIN events_fts f ON f.rowid = e.rowid "
+            "WHERE events_fts MATCH ? AND e.theater = ? "
+            "ORDER BY e.timestamp DESC LIMIT ?"
+        )
+        try:
+            return conn.execute(sql, (match_expr, theater, limit)).fetchall()
+        except sqlite3.OperationalError:
+            pass  # FTS5 missing → LIKE fallback below
+    else:
+        sql = (
+            f"SELECT {feed_cols_qualified} FROM events e "
+            "JOIN events_fts f ON f.rowid = e.rowid "
+            "WHERE events_fts MATCH ? "
+            "ORDER BY e.timestamp DESC LIMIT ?"
+        )
+        try:
+            return conn.execute(sql, (match_expr, limit)).fetchall()
+        except sqlite3.OperationalError:
+            pass
+
+    # Fallback: LIKE scan. Slow on >10k events but correct.
+    like = f"%{q.lower()}%"
+    if theater and theater != "ALL":
+        return conn.execute(
+            f"SELECT {_FEED_COLS} FROM events "
+            "WHERE (lower(summary) LIKE ? OR lower(location) LIKE ?) "
+            "AND theater = ? ORDER BY timestamp DESC LIMIT ?",
+            (like, like, theater, limit),
+        ).fetchall()
+    return conn.execute(
+        f"SELECT {_FEED_COLS} FROM events "
+        "WHERE lower(summary) LIKE ? OR lower(location) LIKE ? "
+        "ORDER BY timestamp DESC LIMIT ?",
+        (like, like, limit),
+    ).fetchall()
+
+
+def theater_counts_since(
+    conn: sqlite3.Connection,
+    hours: int = 6,
+) -> dict:
+    """Single-query equivalent of calling events_since(theater=X) once
+    per theater in _render_theaters.
+
+    Returns {theater: count}. Saves 5 round-trips on every feed paint
+    (and every auto-scrape, and every filter cycle). Counts are filtered
+    by event time (not first_seen_at) to match the legacy semantics.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    rows = conn.execute(
+        "SELECT theater, COUNT(*) AS n FROM events "
+        "WHERE timestamp >= ? GROUP BY theater",
+        (cutoff,),
+    ).fetchall()
+    return {r["theater"]: r["n"] for r in rows}
 
 
 def stats_today(conn: sqlite3.Connection) -> dict:

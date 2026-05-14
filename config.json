@@ -4,6 +4,14 @@
   "ingest_max_age_days": 3,
   "auto_scrape_minutes": 5,
   "retention_days": 30,
+  "scrape_log_retention_days": 14,
+  "alerts_log_retention_days": 60,
+  "vacuum_on_startup": true,
+  "dedup": {
+    "tight_window_min": 15,
+    "wide_window_min": 240,
+    "cluster_window_min": 720
+  },
   "context_refresh_minutes": 30,
   "sources": {
     "liveuamap_lebanon": {

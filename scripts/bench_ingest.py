@@ -100,7 +100,10 @@ def _query_recent(loops: int = 10) -> float:
 
 
 def _show_pragmas() -> None:
-    conn = sqlite3.connect(DB)
+    """Open via models.get_conn() — a bare sqlite3.connect() would skip
+    the PRAGMA tuning we want to verify and print the defaults, which
+    is misleading."""
+    conn = models.get_conn()
     print("\n=== sqlite pragmas ===")
     for p in ("journal_mode", "synchronous", "cache_size", "temp_store", "mmap_size"):
         v = conn.execute(f"PRAGMA {p}").fetchone()
