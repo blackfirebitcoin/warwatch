@@ -597,11 +597,16 @@ async def scrape_liveuamap(client: httpx.AsyncClient) -> list[Event]:
     return events
 
 
-async def scrape_rss(client: httpx.AsyncClient, key: str) -> list[Event]:
-    src = CONFIG["sources"][key]
-    html = await fetch(client, src["url"])
-    if not html:
-        return []
+def _parse_rss_blob(src: dict, html: str) -> list[Event]:
+    """Synchronous RSS body parser — extracted so async callers can
+    push it onto a worker thread.
+
+    feedparser.parse + BeautifulSoup.get_text are CPU-bound and were
+    running directly on the Textual event loop (and serialized across
+    the 14 RSS sources because asyncio coroutines don't actually
+    parallelize CPU work). Moving this off-loop lets asyncio.gather
+    fan it out across the default thread executor.
+    """
     feed = feedparser.parse(html)
     events: list[Event] = []
     for entry in feed.entries[:80]:
@@ -636,6 +641,14 @@ async def scrape_rss(client: httpx.AsyncClient, key: str) -> list[Event]:
             confidence="REPORTED",
         ))
     return events
+
+
+async def scrape_rss(client: httpx.AsyncClient, key: str) -> list[Event]:
+    src = CONFIG["sources"][key]
+    html = await fetch(client, src["url"])
+    if not html:
+        return []
+    return await asyncio.to_thread(_parse_rss_blob, src, html)
 
 
 async def scrape_unifil(client: httpx.AsyncClient) -> list[Event]:
@@ -786,7 +799,17 @@ async def run_all() -> dict:
     """Full scrape cycle. Returns summary dict."""
     headers = {"User-Agent": CONFIG["user_agent"], "Accept": "*/*"}
     global_max_age = int(CONFIG.get("ingest_max_age_days", 3))
-    async with httpx.AsyncClient(headers=headers, timeout=CONFIG["request_timeout"]) as client:
+    # Split connect/read timeouts: a slow DNS or TCP handshake shouldn't
+    # eat the same 20s budget as a legitimately slow body. read=20s
+    # matches the previous global timeout so behavior on slow servers
+    # is unchanged; connect=5s prevents a dead host from holding back
+    # the rest of the asyncio.gather.
+    request_timeout = CONFIG["request_timeout"]
+    timeout = httpx.Timeout(request_timeout, connect=5.0)
+    limits = httpx.Limits(max_connections=30, max_keepalive_connections=15)
+    async with httpx.AsyncClient(
+        headers=headers, timeout=timeout, limits=limits, http2=False,
+    ) as client:
         results = await asyncio.gather(*(run_one(client, k) for k in SCRAPERS.keys()))
 
     # DB dedup + upsert is synchronous/blocking; run in a thread so the

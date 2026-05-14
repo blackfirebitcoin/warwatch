@@ -1213,6 +1213,7 @@ class WarWatchApp(App):
         self.run_worker(self._do_scrape(silent=silent), exclusive=True)
 
     async def _do_scrape(self, silent: bool = False) -> None:
+        new_n = merged_n = 0
         try:
             summary = await run_all()
             new_n = summary.get("total_new", 0)
@@ -1231,7 +1232,15 @@ class WarWatchApp(App):
             # the stats bar already surfaces persistently-degraded feeds.
         finally:
             self._scraping = False
-        self.refresh_feed()
+        # Skip the ListView rebuild when a silent (background) scrape
+        # produced no DB changes — the existing rows are still correct
+        # and the rebuild would clear+remount ~200 widgets for no reason.
+        # User-initiated refreshes still always repaint so the user sees
+        # the "✓ +0 new" status against a freshly-rendered feed.
+        if (not silent) or new_n or merged_n:
+            self.refresh_feed()
+        else:
+            self.refresh_header()
 
     def action_sitrep(self) -> None:
         self.push_screen(SitrepScreen())

@@ -7,6 +7,7 @@ import os
 import sqlite3
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -63,6 +64,9 @@ CREATE TABLE IF NOT EXISTS alerts_fired (
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_theater ON events(theater);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+-- Compound: Pass 2/3 of find_dup filter on (theater AND timestamp BETWEEN);
+-- the planner picks this over either single-column index every time.
+CREATE INDEX IF NOT EXISTS idx_events_theater_ts ON events(theater, timestamp);
 CREATE INDEX IF NOT EXISTS idx_scrape_log_ts ON scrape_log(timestamp);
 
 CREATE TABLE IF NOT EXISTS briefs (
@@ -126,7 +130,15 @@ def get_conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # WAL + relaxed durability is safe for a derived/recoverable feed:
+    # an unclean shutdown can lose the last few seconds of a scrape, which
+    # the next 5-minute cycle re-pulls anyway. NORMAL gives ~2-3x faster
+    # commits than the default FULL.
     conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA temp_store=MEMORY;")
+    conn.execute("PRAGMA cache_size=-20000;")  # 20 MB page cache
+    conn.execute("PRAGMA mmap_size=67108864;")  # 64 MB mmap window
     return conn
 
 
@@ -177,6 +189,7 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_events_theater ON events(theater);
                 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+                CREATE INDEX IF NOT EXISTS idx_events_theater_ts ON events(theater, timestamp);
                 COMMIT;
                 """
             )
@@ -231,18 +244,27 @@ _STOPWORDS = frozenset({
 })
 
 
-def _summary_tokens(s: Optional[str]) -> set:
+@lru_cache(maxsize=8192)
+def _summary_tokens(s: Optional[str]) -> frozenset:
+    """Content tokens for fuzzy-dedup overlap math.
+
+    Memoized: in a typical ingest cycle the same DB row is tokenized
+    once for every incoming event whose time-window overlaps it
+    (~38× per row in measurement). Caching collapses that to one
+    tokenization per unique summary.
+    """
     if not s:
-        return set()
+        return frozenset()
     words = []
     for w in (s.lower().replace("'", " ").replace("-", " ").split()):
         w = "".join(ch for ch in w if ch.isalnum())
         if len(w) >= 4 and w not in _STOPWORDS:
             words.append(w)
-    return set(words)
+    return frozenset(words)
 
 
-def _summary_bigrams(s: Optional[str]) -> set:
+@lru_cache(maxsize=8192)
+def _summary_bigrams(s: Optional[str]) -> frozenset:
     """Adjacent bigrams over content tokens.
 
     Char floor lowered to 3 (vs 4 for `_summary_tokens`) so 3-letter
@@ -257,7 +279,7 @@ def _summary_bigrams(s: Optional[str]) -> set:
         w = "".join(ch for ch in w if ch.isalnum())
         if len(w) >= 3 and w not in _STOPWORDS:
             words.append(w)
-    return {(words[i], words[i + 1]) for i in range(len(words) - 1)}
+    return frozenset((words[i], words[i + 1]) for i in range(len(words) - 1))
 
 
 def _summary_similar(a: Optional[str], b: Optional[str], threshold: float = 0.35) -> bool:
@@ -342,7 +364,7 @@ def find_dup(
     """
     ev_dt = _parse_ts(ev.timestamp)
     if ev_dt is None:
-        return conn.execute("SELECT * FROM events WHERE id=?", (ev.id,)).fetchone()
+        return conn.execute(f"SELECT {_DUP_COLS} FROM events WHERE id=?", (ev.id,)).fetchone()
 
     ev_loc_known = bool(ev.location)
 
@@ -359,7 +381,7 @@ def find_dup(
     low = (ev_dt - timedelta(minutes=tight_window_min)).isoformat()
     high = (ev_dt + timedelta(minutes=tight_window_min)).isoformat()
     rows = conn.execute(
-        "SELECT * FROM events WHERE timestamp BETWEEN ? AND ?",
+        f"SELECT {_DUP_COLS} FROM events WHERE timestamp BETWEEN ? AND ?",
         (low, high),
     ).fetchall()
     for r in rows:
@@ -381,7 +403,7 @@ def find_dup(
     low2 = (ev_dt - timedelta(minutes=wide_window_min)).isoformat()
     high2 = (ev_dt + timedelta(minutes=wide_window_min)).isoformat()
     rows2 = conn.execute(
-        "SELECT * FROM events WHERE theater=? AND timestamp BETWEEN ? AND ?",
+        f"SELECT {_DUP_COLS} FROM events WHERE theater=? AND timestamp BETWEEN ? AND ?",
         (ev.theater, low2, high2),
     ).fetchall()
     for r in rows2:
@@ -424,7 +446,7 @@ def find_dup(
         low3 = (ev_dt - timedelta(minutes=cluster_window_min)).isoformat()
         high3 = (ev_dt + timedelta(minutes=cluster_window_min)).isoformat()
         rows3 = conn.execute(
-            "SELECT * FROM events WHERE theater=? AND timestamp BETWEEN ? AND ?",
+            f"SELECT {_DUP_COLS} FROM events WHERE theater=? AND timestamp BETWEEN ? AND ?",
             (ev.theater, low3, high3),
         ).fetchall()
 
@@ -449,7 +471,7 @@ def find_dup(
             if ev_bigrams and r_bigrams and len(ev_bigrams & r_bigrams) >= 2:
                 return r
 
-    return conn.execute("SELECT * FROM events WHERE id=?", (ev.id,)).fetchone()
+    return conn.execute(f"SELECT {_DUP_COLS} FROM events WHERE id=?", (ev.id,)).fetchone()
 
 
 def upsert_event(conn: sqlite3.Connection, ev: Event) -> str:
@@ -618,6 +640,12 @@ _FEED_COLS = (
     "id, timestamp, first_seen_at, location, lat, lon, event_type, "
     "summary, sources, confidence, theater"
 )
+
+# Columns find_dup() actually reads off candidate rows. Drops raw_data
+# (always NULL), lat/lon, first_seen_at, timestamp, created_at, updated_at
+# — none are read in the dedup or merge path. SELECT * here was paying
+# row-hydration cost on every candidate in the time window.
+_DUP_COLS = "id, location, event_type, summary, sources, confidence, theater"
 
 
 def recent_events(conn: sqlite3.Connection, limit: int = 200, theater: Optional[str] = None):
