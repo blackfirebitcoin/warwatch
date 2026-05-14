@@ -1,0 +1,5 @@
+beautifulsoup4==4.14.3
+feedparser==6.0.12
+httpx==0.28.1
+lxml==6.0.3
+textual==8.2.3

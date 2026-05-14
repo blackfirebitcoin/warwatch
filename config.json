@@ -1,0 +1,235 @@
+{
+  "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+  "request_timeout": 20,
+  "ingest_max_age_days": 3,
+  "auto_scrape_minutes": 5,
+  "retention_days": 30,
+  "context_refresh_minutes": 30,
+  "sources": {
+    "liveuamap_lebanon": {
+      "name": "LiveUAMap Lebanon",
+      "url": "https://lebanon.liveuamap.com/",
+      "kind": "html",
+      "theater_hint": "LEBANON",
+      "credible": true
+    },
+    "lorient_today": {
+      "name": "L'Orient Today",
+      "url": "https://news.google.com/rss/search?q=site:today.lorientlejour.com+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": "LEBANON",
+      "credible": true
+    },
+    "aljazeera_rss": {
+      "name": "Al Jazeera English",
+      "url": "https://news.google.com/rss/search?q=site:aljazeera.com+(lebanon+OR+hezbollah+OR+iran+OR+gaza+OR+houthi)+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": null,
+      "credible": true
+    },
+    "timesofisrael_liveblog": {
+      "name": "Times of Israel",
+      "url": "https://news.google.com/rss/search?q=site:timesofisrael.com+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": null,
+      "credible": true,
+      "attribution": "Israeli media"
+    },
+    "reuters_me_rss": {
+      "name": "Reuters Middle East",
+      "url": "https://news.google.com/rss/search?q=site:reuters.com+(lebanon+OR+iran+OR+gaza+OR+hezbollah)+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": null,
+      "credible": true
+    },
+    "almayadeen": {
+      "name": "Al Mayadeen English",
+      "url": "https://news.google.com/rss/search?q=site:english.almayadeen.net+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": null,
+      "credible": true,
+      "attribution": "Hezbollah-aligned"
+    },
+    "idf_press": {
+      "name": "IDF Press Releases",
+      "url": "https://news.google.com/rss/search?q=(%22IDF+Spokesperson%22+OR+%22Israel+Defense+Forces%22)+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": null,
+      "credible": true,
+      "attribution": "Israeli military"
+    },
+    "unifil": {
+      "name": "UNIFIL",
+      "url": "https://unifil.unmissions.org/en/news",
+      "kind": "html",
+      "theater_hint": "LEBANON",
+      "credible": true,
+      "attribution": "UN peacekeepers",
+      "max_age_days": 21
+    },
+    "reuters_energy": {
+      "name": "Reuters Energy",
+      "url": "https://news.google.com/rss/search?q=site:reuters.com+(oil+OR+opec+OR+tanker+OR+pipeline+OR+refinery+OR+lng+OR+crude)+when:3d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": "ENERGY",
+      "credible": true,
+      "relevance_gate": "commodity"
+    },
+    "opec_press": {
+      "name": "OPEC Press",
+      "url": "https://news.google.com/rss/search?q=site:opec.org+when:14d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": "ENERGY",
+      "credible": true,
+      "attribution": "OPEC Secretariat",
+      "relevance_gate": "commodity",
+      "max_age_days": 14
+    },
+    "eia_today": {
+      "name": "US EIA",
+      "url": "https://www.eia.gov/rss/todayinenergy.xml",
+      "kind": "rss",
+      "theater_hint": "ENERGY",
+      "credible": true,
+      "attribution": "US official",
+      "relevance_gate": "commodity",
+      "max_age_days": 7
+    },
+    "ukmto": {
+      "name": "UKMTO",
+      "url": "https://news.google.com/rss/search?q=(UKMTO+OR+%22UK+Maritime+Trade%22)+(incident+OR+attack+OR+vessel+OR+tanker+OR+advisory+OR+warning)+when:7d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": "ENERGY",
+      "credible": true,
+      "attribution": "UK maritime authority",
+      "relevance_gate": "commodity",
+      "max_age_days": 7
+    },
+    "bloomberg_energy": {
+      "name": "Bloomberg Energy",
+      "url": "https://news.google.com/rss/search?q=site:bloomberg.com+(oil+OR+opec+OR+lng+OR+tanker+OR+pipeline+OR+refinery+OR+crude)+when:3d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": "ENERGY",
+      "credible": true,
+      "relevance_gate": "commodity"
+    },
+    "oilprice_news": {
+      "name": "Oilprice.com",
+      "url": "https://news.google.com/rss/search?q=site:oilprice.com+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": "ENERGY",
+      "credible": true,
+      "relevance_gate": "commodity"
+    },
+    "lloyds_list": {
+      "name": "Lloyd's List",
+      "url": "https://news.google.com/rss/search?q=site:lloydslist.com+(tanker+OR+vessel+OR+attack+OR+chokepoint+OR+sanctions)+when:4d&hl=en-US&gl=US&ceid=US:en",
+      "kind": "rss",
+      "theater_hint": "ENERGY",
+      "credible": true,
+      "attribution": "shipping industry",
+      "relevance_gate": "commodity",
+      "max_age_days": 4
+    }
+  },
+  "theaters": {
+    "LEBANON": {
+      "keywords": [
+        "lebanon", "hezbollah", "unifil", "south lebanon", "blue line",
+        "beirut", "dahiyeh", "dahieh", "dahiya",
+        "bint jbeil", "nabatieh", "nabatiyeh", "nabatiya", "nabatia",
+        "tyre", "sour", "sidon", "saida",
+        "baalbek", "hermel", "bekaa", "beqaa", "western bekaa",
+        "litani", "south litani",
+        "haboush", "jezzine", "jebchit", "sharqiyah", "sahmar",
+        "haris", "hanawiyah", "hadatha", "kfarkela", "kfar kila",
+        "deir qanoun", "al-shahabiya", "dbeibine", "mansouri", "al-hawsh",
+        "al-sarafand", "khirbet yaroun", "khirbet al-duwayr", "al-rayhan",
+        "maroun al-ras", "marjayoun", "aita al-shaab", "aita ash shaab",
+        "khiam", "yaroun",
+        "dours", "ansar", "ghaziyeh", "tayr harfa", "rmeish", "kunin",
+        "al-majadel", "al-sultaniyah", "al-bazouriyeh", "safad al-batikh",
+        "qaqaiyat al-jisr", "wadi zifta", "kfar tibnit", "chebaa", "shebaa",
+        "meiss al-jabal", "meiss el-jabal", "maiss al-jabal",
+        "houla", "markaba", "taybeh", "blida", "marwaheen",
+        "odaisseh", "odeisseh", "kfar shouba", "rachaya al-foukhar",
+        "kiryat shmona", "qiryat shmona", "metula", "metulla",
+        "nahariya", "haifa", "akko", "karmiel", "safed", "tzfat", "zefat",
+        "tiberias", "rosh hanikra", "rosh haniqra", "shlomi", "avivim",
+        "margaliot", "kfar giladi", "manara", "malkia", "zarit",
+        "ma'alot", "maalot", "dovev", "shtula", "yaara", "ya'ara",
+        "kiryat ata", "kiryat motzkin"
+      ]
+    },
+    "IRAN": {
+      "keywords": [
+        "iran", "iranian", "irgc", "pasdaran", "basij", "quds force",
+        "tehran", "qom", "isfahan", "esfahan", "shiraz", "mashhad", "tabriz",
+        "karaj", "kermanshah", "ahvaz", "ahwaz", "bandar abbas", "chabahar",
+        "kish island", "kharg island", "kharg", "assaluyeh",
+        "natanz", "fordow", "fordo", "arak", "bushehr", "parchin",
+        "khondab", "yazd", "imam khomeini airport", "mehrabad",
+        "strait of hormuz", "persian gulf", "caspian",
+        "khamenei", "pezeshkian", "araghchi"
+      ]
+    },
+    "GAZA": {
+      "keywords": [
+        "gaza", "gaza strip", "gaza city", "hamas", "islamic jihad", "qassam",
+        "rafah", "khan younis", "khan yunis", "deir al balah", "deir al-balah",
+        "jabalia", "jabaliya", "al-shati", "shati", "nuseirat", "nuseirat camp",
+        "maghazi", "bureij", "beit hanoun", "beit lahiya", "beit lahia",
+        "shujaiya", "zeitoun", "al-mawasi", "mawasi", "tel al-hawa",
+        "kerem shalom", "philadelphi corridor", "netzarim corridor",
+        "al-shifa", "al shifa hospital", "european hospital",
+        "sderot", "be'eri", "kfar aza", "nir oz", "kissufim"
+      ]
+    },
+    "SYRIA": {
+      "keywords": [
+        "syria", "damascus", "homs", "aleppo", "latakia", "tartous", "tartus",
+        "palmyra", "idlib", "hama", "deir ez-zor", "deir ez zor", "raqqa",
+        "qamishli", "hasakah", "t4 airbase", "tiyas", "mezzeh",
+        "golan heights", "quneitra"
+      ]
+    },
+    "YEMEN": {
+      "keywords": [
+        "yemen", "yemeni", "houthi", "houthis", "ansar allah",
+        "sanaa", "sana'a", "hodeidah", "hudaydah", "aden", "taiz", "marib",
+        "saada", "dhamar", "al-bayda", "bab el-mandeb", "bab al-mandab",
+        "red sea", "gulf of aden"
+      ]
+    },
+    "ENERGY": {
+      "keywords": [
+        "oil", "crude", "petroleum", "gasoline", "diesel", "jet fuel",
+        "brent", "wti", "opec", "opec+", "barrel", "bpd", "mbpd",
+        "lng", "natural gas", "liquefied natural gas", "condensate",
+        "tanker", "vlcc", "supertanker", "shipment", "cargo",
+        "pipeline", "refinery", "refineries", "terminal", "platform",
+        "oilfield", "oil field", "oil well", "rig",
+        "embargo", "sanctions", "spr", "strategic petroleum reserve",
+        "production cut", "output cut", "production quota", "quota",
+        "aramco", "saudi aramco", "adnoc", "qatar energy",
+        "rosneft", "gazprom", "lukoil", "kuwait petroleum",
+        "iea", "eia", "international energy agency",
+        "strait of hormuz", "bab el-mandeb", "bab al-mandab",
+        "suez canal", "bosphorus", "turkish straits", "dardanelles",
+        "red sea shipping", "gulf of oman",
+        "ras tanura", "fujairah", "jebel ali", "yanbu", "abqaiq",
+        "kharg island", "ceyhan", "basra terminal", "basra port",
+        "novorossiysk", "ust-luga", "primorsk",
+        "ghawar", "khurais",
+        "houthi tanker", "tanker attack", "tanker seized", "tanker boarded",
+        "pipeline attack", "pipeline sabotage", "pipeline explosion"
+      ]
+    }
+  },
+  "ceasefire_context": "Iran-US ceasefire via Pakistan (effective 2026-04-09) — applicability to Lebanon is DISPUTED. US/Israel: ceasefire does NOT cover Lebanon. Iran/Pakistan: claim it does.",
+  "alerts": {
+    "enabled": true,
+    "min_confidence": "CONFIRMED",
+    "event_types": ["GROUND_OP", "SUPPLY_DISRUPTION", "CASUALTY", "CEASEFIRE_UPDATE"]
+  }
+}
