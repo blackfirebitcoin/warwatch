@@ -42,15 +42,9 @@
 
 ## Why I built it
 
-Mainstream news reporting is a failed model — by the time a story clears the
-desk, the actionable signal is gone. I needed a ground-truth heartbeat: raw
-OSINT, news, and shipping data streaming in continuously, deduplicated across
-15 sources, classified by theater, and surfaced before a narrative gets
-attached.
-
-WarWatch helped clear up the fog of war during live escalation cycles. I've
-executed profitable Brent crude trades based on its analysis in real-time
-scenarios.
+Mainstream news reporting is a failed model — I needed a ground-truth
+heartbeat. WarWatch cut through the fog of war and supported profitable
+Brent crude trades based on its analysis in real-time scenarios.
 
 ## Stack
 
