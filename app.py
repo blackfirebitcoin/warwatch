@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,35 @@ ROOT = Path(__file__).resolve().parent
 REPORTS = ROOT / "reports"
 CONFIG = json.loads((ROOT / "config.json").read_text())
 STATE_PATH = ROOT / "db" / "state.json"
+
+
+_SEARCH_WORD_RE = re.compile(r"[\w]+")
+
+
+def row_matches_search(row, query: str) -> bool:
+    """Fallback row-level match with the same token/prefix semantics as
+    models.search_events().
+
+    FTS5 handles the primary search path in refresh_feed(); this helper
+    keeps theater/status counts and row-level composed filters consistent
+    when we need to filter an already-fetched row list in Python.
+    """
+    q = (query or "").strip().lower()
+    if not q:
+        return True
+    haystack = f"{row['summary'] or ''} {row['location'] or ''}".lower()
+    words = _SEARCH_WORD_RE.findall(haystack)
+    for raw in q.split():
+        token = raw.strip("\"'").lower()
+        if not token:
+            continue
+        if token.endswith("*"):
+            prefix = token[:-1]
+            if prefix and not any(word.startswith(prefix) for word in words):
+                return False
+        elif token not in haystack:
+            return False
+    return True
 
 
 # ---------- time helpers ----------
@@ -983,11 +1013,13 @@ class WarWatchApp(App):
             f"[bold]WARWATCH v1.0[/bold]{self._filter_tags()}   {now_local}{busy}{msg}"
         )
 
-    def _apply_filters(self, rows: list) -> list:
+    def _apply_filters(self, rows: list, *, apply_search: bool = True) -> list:
         """Apply confidence / type-group / text filters to a row list.
 
         Theater filtering happens upstream in the SQL query because it's
-        indexed; the other three are cheap Python-side predicates.
+        indexed; search filtering normally happens upstream via FTS5 in
+        refresh_feed(), but this fallback keeps composed row-list filters
+        (counts, confidence, type groups) semantically identical.
         """
         out = rows
         if self.filter_confidence == "CONFIRMED":
@@ -999,14 +1031,8 @@ class WarWatchApp(App):
             allowed = ETYPE_GROUPS.get(self.filter_etype, set())
             out = [r for r in out if r["event_type"] in allowed]
 
-        if self.filter_search:
-            q = self.filter_search.lower()
-            # Python substring still applied here so this composes with
-            # confidence/etype filters that operate on the row list. The
-            # FTS5-backed pre-filter happens upstream in refresh_feed
-            # when no other row-level filters are active.
-            out = [r for r in out if q in (r["summary"] or "").lower()
-                   or q in (r["location"] or "").lower()]
+        if apply_search and self.filter_search:
+            out = [r for r in out if row_matches_search(r, self.filter_search)]
         return out
 
     def refresh_feed(self) -> None:
@@ -1020,15 +1046,22 @@ class WarWatchApp(App):
         if prior_idx is not None and 0 <= prior_idx < len(self._rows):
             prior_id = self._rows[prior_idx]["id"]
 
+        search_applied = False
         conn = models.get_conn()
         try:
-            raw_rows = list(models.recent_events(conn, limit=400, theater=self.filter_theater))
+            if self.filter_search:
+                raw_rows = list(models.search_events(
+                    conn, self.filter_search, limit=400, theater=self.filter_theater,
+                ))
+                search_applied = True
+            else:
+                raw_rows = list(models.recent_events(conn, limit=400, theater=self.filter_theater))
             self._render_theaters(conn)
             self._render_stats(conn)
         finally:
             conn.close()
 
-        self._rows = self._apply_filters(raw_rows)[:200]
+        self._rows = self._apply_filters(raw_rows, apply_search=not search_applied)[:200]
 
         # batch_update suppresses intermediate redraws; mount(*items) inserts
         # all ListItems in one DOM pass instead of triggering a layout on each.

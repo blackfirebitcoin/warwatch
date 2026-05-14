@@ -93,3 +93,25 @@ def test_search_matches_location_when_summary_clean():
     a = _app()
     a.filter_search = "kiryat"
     assert _ids(a._apply_filters(_rows())) == {"5"}
+
+
+def test_search_prefix_matches_word_start():
+    a = _app()
+    a.filter_search = "nab*"
+    assert _ids(a._apply_filters(_rows())) == {"1"}
+
+
+def test_search_prefix_does_not_match_mid_word():
+    a = _app()
+    a.filter_search = "az*"
+    # Gaza contains "az" mid-word, but prefix search should only match
+    # token starts, matching FTS5's "az"* semantics.
+    assert _ids(a._apply_filters(_rows())) == set()
+
+
+def test_apply_filters_can_skip_search_when_prefiltered_by_fts():
+    a = _app()
+    a.filter_search = "does-not-appear"
+    # refresh_feed passes apply_search=False after models.search_events()
+    # has already applied the FTS predicate upstream.
+    assert _ids(a._apply_filters(_rows(), apply_search=False)) == {"1", "2", "3", "4", "5"}

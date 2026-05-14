@@ -16,7 +16,7 @@
 <p align="center">
   <img alt="Python 3.10+"      src="https://img.shields.io/badge/python-3.10+-blue">
   <img alt="License: MIT"      src="https://img.shields.io/badge/license-MIT-green">
-  <img alt="Tests: 62 passing" src="https://img.shields.io/badge/tests-76%20passing-brightgreen">
+  <img alt="Tests: 79 passing" src="https://img.shields.io/badge/tests-79%20passing-brightgreen">
   <img alt="Status: prototype" src="https://img.shields.io/badge/status-prototype-orange">
 </p>
 
@@ -117,9 +117,9 @@ reproducible.
 pytest
 ```
 
-76 tests cover classifier behavior, three-pass deduplication, filter
-composition, brief threading, FTS5 search, retention, audit, and
-data-backfill correctness.
+79 tests cover classifier behavior, three-pass deduplication, filter
+composition, brief threading, FTS5 search/prefix semantics, retention, audit,
+and data-backfill correctness.
 
 ## Benchmarking ingest
 
