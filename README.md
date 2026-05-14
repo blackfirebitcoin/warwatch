@@ -5,11 +5,12 @@
 > synthesizes events into SITREP-style briefings via an LLM layer.
 
 <p align="center">
-  <a href="docs/dashboard.mp4">
+  <a href="docs/dashboard.mp4?raw=true">
     <img src="docs/dashboard.gif" alt="WarWatch live demo — feed, theater filter, SITREP" width="900">
   </a>
-  <br>
-  <sub>↑ Click the GIF for a 385KB MP4 with native video controls.</sub>
+</p>
+<p align="center">
+  <sub>↑ Click the GIF to download the 385 KB MP4 (HTML5-video controls, sharper).</sub>
 </p>
 
 <p align="center">
