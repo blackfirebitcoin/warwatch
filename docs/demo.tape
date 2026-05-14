@@ -31,6 +31,9 @@ Hide
 Type "source .venv/bin/activate"
 Enter
 Sleep 400ms
+Type "rm -f db/state.json"
+Enter
+Sleep 300ms
 Type "clear"
 Enter
 Sleep 400ms
@@ -66,15 +69,17 @@ Sleep 800ms
 Up 2
 Sleep 800ms
 
-# Open the theater filter modal — number-key selection menu.
+# Open the theater filter modal and choose with arrow keys.
 Type "t"
 Sleep 1500ms
-
-# Pick Lebanon.
-Type "1"
+Up 2
+Sleep 700ms
+Down 1
+Sleep 700ms
+Enter
 Sleep 2500ms
 
-# Scroll the Lebanon-filtered feed.
+# Scroll the filtered feed.
 Down 2
 Sleep 500ms
 Down 2

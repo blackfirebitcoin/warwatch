@@ -370,28 +370,50 @@ class SitrepScreen(ModalScreen):
 class TheaterScreen(ModalScreen):
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
-        Binding("1", "pick('LEBANON')", "Lebanon"),
-        Binding("2", "pick('IRAN')", "Iran"),
-        Binding("3", "pick('GAZA')", "Gaza"),
-        Binding("4", "pick('SYRIA')", "Syria"),
-        Binding("5", "pick('YEMEN')", "Yemen"),
-        Binding("6", "pick('ENERGY')", "Energy"),
-        Binding("0", "pick('ALL')", "All"),
+        Binding("1", "pick('LEBANON')", "Lebanon", show=False),
+        Binding("2", "pick('IRAN')", "Iran", show=False),
+        Binding("3", "pick('GAZA')", "Gaza", show=False),
+        Binding("4", "pick('SYRIA')", "Syria", show=False),
+        Binding("5", "pick('YEMEN')", "Yemen", show=False),
+        Binding("6", "pick('ENERGY')", "Energy", show=False),
+        Binding("0", "pick('ALL')", "All", show=False),
+    ]
+
+    _CHOICES = [
+        ("LEBANON", "LEBANON"),
+        ("IRAN", "IRAN"),
+        ("GAZA", "GAZA"),
+        ("SYRIA", "SYRIA"),
+        ("YEMEN", "YEMEN"),
+        ("ENERGY", "ENERGY"),
+        ("ALL", "ALL THEATERS"),
     ]
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll():
+        with Container(id="theater-picker"):
             yield Static(
-                "[bold]Select theater[/bold]\n\n"
-                "  [1] LEBANON\n"
-                "  [2] IRAN\n"
-                "  [3] GAZA\n"
-                "  [4] SYRIA\n"
-                "  [5] YEMEN\n"
-                "  [6] ENERGY\n"
-                "  [0] ALL\n\n"
-                "[dim]Esc to cancel[/dim]"
+                "[bold]Select theater[/bold]  "
+                "[dim]↑/↓ move · Enter apply · 0-6 shortcuts · Esc cancel[/dim]",
+                id="theater-picker-title",
             )
+            with ListView(id="theater-picker-list"):
+                for theater, label in self._CHOICES:
+                    yield ListItem(Label(f"  {label}"), id=f"theater-{theater.lower()}")
+
+    def on_mount(self) -> None:
+        lv = self.query_one("#theater-picker-list", ListView)
+        active = self.app.filter_theater or "ALL"
+        idx = next((i for i, (theater, _) in enumerate(self._CHOICES) if theater == active), 0)
+        lv.index = idx
+        lv.focus()
+
+    def _pick_from_item_id(self, item_id: str | None) -> None:
+        if not item_id or not item_id.startswith("theater-"):
+            return
+        self.action_pick(item_id.removeprefix("theater-").upper())
+
+    def on_list_view_selected(self, event) -> None:
+        self._pick_from_item_id(event.item.id)
 
     def action_pick(self, theater: str) -> None:
         self.app.filter_theater = None if theater == "ALL" else theater
@@ -864,6 +886,9 @@ class WarWatchApp(App):
     #sitrep, #detail { padding: 1 2; }
     #search-box { width: 70%; height: auto; padding: 1 2; border: round $accent; background: $panel; }
     #search-box Input { margin-top: 1; }
+    #theater-picker { width: 48%; height: auto; padding: 1 2; border: round $accent; background: $panel; }
+    #theater-picker-title { height: 1; margin-bottom: 1; }
+    #theater-picker-list { height: 9; }
     #brief-box {
         width: 90%;
         height: 85%;
