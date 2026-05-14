@@ -733,21 +733,18 @@ def _is_fresh(ev_ts: str, max_age_days: int) -> bool:
     return age.total_seconds() <= max_age_days * 86400
 
 
-async def run_all() -> dict:
-    """Full scrape cycle. Returns summary dict."""
-    headers = {"User-Agent": CONFIG["user_agent"], "Accept": "*/*"}
-    global_max_age = int(CONFIG.get("ingest_max_age_days", 3))
-    summary = {"total_new": 0, "total_merged": 0, "total_stale": 0, "per_source": {}}
-    async with httpx.AsyncClient(headers=headers, timeout=CONFIG["request_timeout"]) as client:
-        results = await asyncio.gather(*(run_one(client, k) for k in SCRAPERS.keys()))
+def _process_results(results: list, global_max_age: int) -> dict:
+    """Synchronous DB processing after HTTP fetches complete.
 
+    Extracted so run_all() can offload this to a thread via asyncio.to_thread,
+    keeping the Textual event loop free during dedup and upsert work.
+    """
+    summary = {"total_new": 0, "total_merged": 0, "total_stale": 0, "per_source": {}}
     conn = get_conn()
     try:
         for key, events, status in results:
             src_cfg = CONFIG["sources"][key]
             src_name = src_cfg["name"]
-            # Per-source override (e.g. UNIFIL publishes every 3–7 days; the
-            # global 3-day cutoff was dropping every UNIFIL item at ingest).
             src_max_age = int(src_cfg.get("max_age_days", global_max_age))
             new_n = merged_n = stale_n = 0
             for ev in events:
@@ -777,18 +774,24 @@ async def run_all() -> dict:
     finally:
         conn.close()
 
-    # Push alerts run after commit so pending_alerts() sees the latest
-    # confidence state (a merge that flipped REPORTED → CONFIRMED on this
-    # cycle must be visible before we check). Own connection — don't
-    # reuse the one we just closed.
     try:
         from alerts import fire_pending_alerts
         summary["alerts_fired"] = fire_pending_alerts()
     except Exception:
-        # Alerts are a convenience layer — a bug here must never take
-        # the scrape cycle down. Swallow and continue.
         summary["alerts_fired"] = 0
     return summary
+
+
+async def run_all() -> dict:
+    """Full scrape cycle. Returns summary dict."""
+    headers = {"User-Agent": CONFIG["user_agent"], "Accept": "*/*"}
+    global_max_age = int(CONFIG.get("ingest_max_age_days", 3))
+    async with httpx.AsyncClient(headers=headers, timeout=CONFIG["request_timeout"]) as client:
+        results = await asyncio.gather(*(run_one(client, k) for k in SCRAPERS.keys()))
+
+    # DB dedup + upsert is synchronous/blocking; run in a thread so the
+    # Textual event loop stays responsive while ~300 find_dup calls execute.
+    return await asyncio.to_thread(_process_results, results, global_max_age)
 
 
 if __name__ == "__main__":

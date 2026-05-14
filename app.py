@@ -1024,12 +1024,14 @@ class WarWatchApp(App):
 
         self._rows = self._apply_filters(raw_rows)[:200]
 
-        lv.clear()
-        if not self._rows:
-            lv.append(ListItem(Label("[dim]No events match the active filters. Press [bold]x[/bold] to clear, [bold]r[/bold] to scrape.[/dim]")))
-        else:
-            for ev in self._rows:
-                lv.append(ListItem(Label(fmt_event_row(ev))))
+        # batch_update suppresses intermediate redraws; mount(*items) inserts
+        # all ListItems in one DOM pass instead of triggering a layout on each.
+        with self.batch_update():
+            lv.clear()
+            if not self._rows:
+                lv.mount(ListItem(Label("[dim]No events match the active filters. Press [bold]x[/bold] to clear, [bold]r[/bold] to scrape.[/dim]")))
+            else:
+                lv.mount(*[ListItem(Label(fmt_event_row(ev))) for ev in self._rows])
 
         # Restore cursor onto the same event id if it survived the filter;
         # otherwise clamp the old index into the new list bounds.
