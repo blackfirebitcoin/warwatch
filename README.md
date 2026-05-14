@@ -1,41 +1,109 @@
 # WarWatch
 
-Terminal dashboard for tracking geopolitical and energy-market signals
-across OSINT, news, and shipping sources. Ingests, deduplicates, classifies,
-and synthesizes events into SITREP-style briefings via an LLM layer.
+> Terminal dashboard for tracking geopolitical and energy-market signals across
+> OSINT, news, and shipping sources. Ingests, deduplicates, classifies, and
+> synthesizes events into SITREP-style briefings via an LLM layer.
 
-![dashboard screenshot](docs/dashboard.png)
+<p align="center">
+  <a href="docs/dashboard.mp4">
+    <img src="docs/dashboard.gif" alt="WarWatch live demo — feed, theater filter, SITREP" width="900">
+  </a>
+  <br>
+  <sub>↑ Click the GIF for a 385KB MP4 with native video controls.</sub>
+</p>
+
+<p align="center">
+  <img alt="Python 3.10+"      src="https://img.shields.io/badge/python-3.10+-blue">
+  <img alt="License: MIT"      src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="Tests: 62 passing" src="https://img.shields.io/badge/tests-62%20passing-brightgreen">
+  <img alt="Status: prototype" src="https://img.shields.io/badge/status-prototype-orange">
+</p>
 
 ## What it does
 
-- Pulls from 15 configured sources (OSINT, news, shipping)
-- Fuzzy deduplication (compressed ~2,058 raw items → ~1,544 events on a
-  recent run, ~25% reduction)
-- Classifies into 6 theaters and 11 event types
-- Stores in SQLite with full-text search and multi-source confirmation
-  tracking
-- Generates SITREP-style briefings on demand using an LLM synthesis layer
+- Pulls from **15 configured sources** (OSINT, news, shipping)
+- **Multi-pass fuzzy deduplication** — tight time/location, wide time/theater,
+  cluster-based token + bigram match (recent run: ~2,058 raw items → ~1,544
+  events, ~25% reduction)
+- Classifies events into **6 theaters** (Lebanon, Iran, Gaza, Syria, Yemen,
+  Energy) and **11 event types**
+- Stores in WAL-mode SQLite with compound indexes and full multi-source
+  confirmation tracking
+- Generates **SITREP-style briefings** on demand using an LLM synthesis layer
   over the live event database
+- Optional Android push alerts via `termux-notification` for high-severity
+  CONFIRMED events
 
 ## Why I built it
 
 OSINT is noisy. The hard problem isn't gathering data — it's deduplication,
-cross-source confirmation, and turning a wall of events into something a
-human can act on. WarWatch is my prototype answer.
+cross-source confirmation, and turning a wall of events into something a human
+can act on. WarWatch is my prototype answer.
 
 ## Stack
 
-Python · SQLite (FTS5) · LLM synthesis (provider-agnostic) · pytest
+Python 3.10+ · SQLite (WAL + compound indexes) · `httpx` · `feedparser` ·
+`beautifulsoup4` · `lxml` ·
+[`textual`](https://github.com/Textualize/textual) · pytest · provider-agnostic
+LLM synthesis (Claude Code CLI by default)
 
 ## Quick start
 
 ```bash
 git clone https://github.com/blackfirebitcoin/warwatch
 cd warwatch
+
+# Recommended: isolate deps (Python 3.10+ required)
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # fill in your LLM API key
+
+# Brief / SITREP needs an LLM. Either install the Claude Code CLI
+# (https://docs.anthropic.com/en/docs/claude-code) — no key needed if you
+# have a subscription — or drop a key in .env for the standalone API:
+cp .env.example .env  # then fill in ANTHROPIC_API_KEY=...
+
 python app.py
 ```
+
+The TUI launches into the live feed. Background scrapes run every
+`auto_scrape_minutes` minutes (default 5).
+
+## Hotkeys
+
+| Key       | Action                          |
+|-----------|---------------------------------|
+| `r`       | Refresh / scrape now            |
+| `t`       | Theater filter                  |
+| `c`       | Cycle confidence filter         |
+| `f`       | Cycle event-type filter         |
+| `/`       | Substring search                |
+| `x`       | Clear filters                   |
+| `d` / ⏎   | Open detail view                |
+| `s`       | SITREP for current theater      |
+| `b`       | LLM brief modal                 |
+| `B`       | Brief archive                   |
+| `h`       | Source health                   |
+| `e`       | Export current view             |
+| `g`       | GeoJSON export                  |
+| `q`       | Quit                            |
+
+## Demo
+
+The demo above is recorded with [Charm `vhs`](https://github.com/charmbracelet/vhs)
+from a scripted tape file. Re-record after a UI change with:
+
+```bash
+brew install vhs ffmpeg     # one-time
+vhs docs/demo.tape          # writes docs/dashboard.gif (~600 KB)
+
+# Optional: produce an MP4 with HTML5-video controls (smaller + crisper).
+ffmpeg -y -i docs/dashboard.gif -movflags +faststart -pix_fmt yuv420p \
+  -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -crf 22 -preset slow \
+  docs/dashboard.mp4
+```
+
+The tape file lives at [`docs/demo.tape`](docs/demo.tape) so the demo stays
+reproducible.
 
 ## Tests
 
@@ -43,8 +111,42 @@ python app.py
 pytest
 ```
 
-Coverage focuses on classifier behavior, deduplication logic, and filter
-composition.
+62 tests cover classifier behavior, three-pass deduplication, filter
+composition, and brief threading.
+
+## Benchmarking ingest
+
+A reproducible micro-benchmark lives in `scripts/bench_ingest.py` so perf
+changes can be measured before/after instead of guessed:
+
+```bash
+python scripts/bench_ingest.py                  # default 2058 events
+python scripts/bench_ingest.py --warm-runs 3    # repeat the warm pass
+python scripts/bench_ingest.py --events 5000    # bigger corpus
+```
+
+Reference numbers (M3 MacBook Pro, after the recent perf pass):
+
+| Phase                       | Wall time | Per event |
+|-----------------------------|----------:|----------:|
+| Cold ingest of 2,058 events |   ~250 ms |   0.12 ms |
+| Warm ingest of 2,058 events |   ~400 ms |   0.19 ms |
+| `recent_events(limit=400)`  |   ~0.5 ms |     —     |
+
+## Configuration cheat sheet
+
+| key                       | default | what it does                                 |
+| ------------------------- | ------- | -------------------------------------------- |
+| `auto_scrape_minutes`     | 5       | Background ingest interval (0 disables)      |
+| `context_refresh_minutes` | 30      | Market-snapshot refresh interval             |
+| `ingest_max_age_days`     | 3       | Drop events older than N days at ingest      |
+| `retention_days`          | 30      | Prune events older than N days from the DB   |
+| `request_timeout`         | 20      | HTTP read timeout per source (seconds)       |
+| `alerts.enabled`          | true    | Fire push notifications for matching events  |
+
+Per-source overrides (e.g. `max_age_days`, `relevance_gate`,
+`theater_hint`) live alongside each entry under `sources` in
+[`config.json`](config.json).
 
 ## Status
 
