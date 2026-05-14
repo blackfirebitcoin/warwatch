@@ -1,49 +1,95 @@
 # WarWatch demo recording -> docs/dashboard.gif
 #
 # Requires Charm's vhs (https://github.com/charmbracelet/vhs):
-#     brew install vhs
+#     brew install vhs ffmpeg gifsicle
+#     brew install --cask font-jetbrains-mono   # tape's requested font
 # Then from the repo root:
 #     vhs docs/demo.tape
+#     gifsicle -O3 --lossy=80 -k 256 docs/dashboard.gif -o docs/dashboard.gif
 #
-# Output: docs/dashboard.gif (1100 x 700, ~14 s, looping)
+# Output: docs/dashboard.gif (1280 x 960, ~32 s, looping; ~950 KB after gifsicle)
 #
-# After a UI change, re-record by running the same command - vhs scripts
-# the keystrokes so the recording stays reproducible.
+# After a UI change, re-record by running the same commands - vhs scripts
+# the keystrokes so the recording stays reproducible. See README's Demo
+# section for the optional MP4 conversion step.
 
 Output docs/dashboard.gif
 
 Set Theme "TokyoNight"
 Set FontFamily "JetBrains Mono"
-Set FontSize 13
-Set Width 1100
-Set Height 700
-Set Padding 16
-Set Framerate 24
+Set FontSize 16
+Set Width 1280
+Set Height 960
+Set Padding 14
+Set Framerate 18
 Set PlaybackSpeed 1.0
+Set TypingSpeed 30ms
 
-# Boot the dashboard. Activate your venv first if you have one.
-Type ".venv/bin/python app.py"
+# Hidden setup: activate venv + clear, so the visible session starts
+# from a fresh prompt and the user just sees `python app.py`.
+Hide
+Type "source .venv/bin/activate"
 Enter
-Sleep 5s
+Sleep 400ms
+Type "clear"
+Enter
+Sleep 400ms
+Show
 
-# Trigger a foreground scrape so the "v +N new" status flashes.
+# Boot the dashboard.
+Type "python app.py"
+Enter
+Sleep 4s
+
+# Foreground scrape — pulls fresh events across the 15 sources so the
+# feed populates with the "v +N new, M merged" status flash.
 Type "r"
 Sleep 5s
 
-# Open the theater filter modal and pick Lebanon (1).
-Type "t"
-Sleep 1s
-Type "1"
-Sleep 3s
+# Navigate the live feed with arrow keys (proves it's interactive).
+Down 2
+Sleep 600ms
+Down 2
+Sleep 600ms
+Down 2
+Sleep 1200ms
 
-# Open a SITREP for the active theater, then close it.
+# Open the highlighted event's detail report.
+Enter
+Sleep 4s
+
+# Close the report and scroll back toward the top of the feed.
+Escape
+Sleep 800ms
+Up 3
+Sleep 800ms
+Up 2
+Sleep 800ms
+
+# Open the theater filter modal — number-key selection menu.
+Type "t"
+Sleep 1500ms
+
+# Pick Lebanon.
+Type "1"
+Sleep 2500ms
+
+# Scroll the Lebanon-filtered feed.
+Down 2
+Sleep 500ms
+Down 2
+Sleep 1200ms
+
+# Open a SITREP synthesis for the active theater.
 Type "s"
 Sleep 4s
-Escape
-Sleep 1s
 
-# Clear filters, then quit.
+# Close the SITREP overlay.
+Escape
+Sleep 800ms
+
+# Clear filters back to the full feed and quit.
 Type "x"
-Sleep 1s
+Sleep 1500ms
 Type "q"
-Sleep 1s
+Sleep 800ms

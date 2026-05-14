@@ -10,7 +10,7 @@
   </a>
 </p>
 <p align="center">
-  <sub>↑ Click the GIF to download the 385 KB MP4 (HTML5-video controls, sharper).</sub>
+  <sub>↑ Click the GIF to download the 745 KB MP4 (HTML5-video controls, sharper).</sub>
 </p>
 
 <p align="center">
@@ -99,8 +99,13 @@ The demo above is recorded with [Charm `vhs`](https://github.com/charmbracelet/v
 from a scripted tape file. Re-record after a UI change with:
 
 ```bash
-brew install vhs ffmpeg     # one-time
-vhs docs/demo.tape          # writes docs/dashboard.gif (~600 KB)
+brew install vhs ffmpeg gifsicle    # one-time
+brew install --cask font-jetbrains-mono   # tape requests JetBrains Mono
+
+vhs docs/demo.tape                  # writes docs/dashboard.gif (~1.4 MB raw)
+
+# Lossless palette + lossy=80 dithering, drops ~32% (1.4 MB → ~950 KB)
+gifsicle -O3 --lossy=80 -k 256 docs/dashboard.gif -o docs/dashboard.gif
 
 # Optional: produce an MP4 with HTML5-video controls (smaller + crisper).
 ffmpeg -y -i docs/dashboard.gif -movflags +faststart -pix_fmt yuv420p \
