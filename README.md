@@ -42,9 +42,15 @@
 
 ## Why I built it
 
-OSINT is noisy. The hard problem isn't gathering data — it's deduplication,
-cross-source confirmation, and turning a wall of events into something a human
-can act on. WarWatch is my prototype answer.
+Mainstream news reporting is a failed model — by the time a story clears the
+desk, the actionable signal is gone. I needed a ground-truth heartbeat: raw
+OSINT, news, and shipping data streaming in continuously, deduplicated across
+15 sources, classified by theater, and surfaced before a narrative gets
+attached.
+
+WarWatch helped clear up the fog of war during live escalation cycles. I've
+executed profitable Brent crude trades based on its analysis in real-time
+scenarios.
 
 ## Stack
 
