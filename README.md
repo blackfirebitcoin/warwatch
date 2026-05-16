@@ -42,9 +42,11 @@
 
 ## Why I built it
 
-Mainstream news reporting is a failed model — I needed a ground-truth
-heartbeat. WarWatch cut through the fog of war and supported profitable
-Brent crude trades based on its analysis in real-time scenarios.
+WarWatch is an experimental geopolitical and energy-market signal dashboard.
+
+The premise is that conventional news products are often too slow, duplicated, narrative-heavy, and weakly structured for time-sensitive analysis. WarWatch tests a different pipeline: ingest many public sources, deduplicate overlapping reports, classify events by theater and type, and generate compact SITREPs for faster review.
+
+The motivating use case is discretionary geopolitical and commodity-market analysis, especially tracking whether conflict, sanctions, shipping disruptions, and infrastructure events can surface useful signal earlier than traditional reporting institutions.
 
 ## Stack
 
